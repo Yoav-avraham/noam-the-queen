@@ -1,0 +1,65 @@
+# Version control
+.git
+.gitattributes
+.gitignore
+
+# IDE and editor
+.vscode
+.idea
+.obsidian
+
+# Python artifacts
+__pycache__
+*.py[codz]
+*.egg-info
+.eggs
+dist
+build
+wheels
+
+# Virtual environments
+.venv
+venv
+env
+ENV
+
+# Testing and coverage
+.pytest_cache
+.coverage
+.coverage.*
+htmlcov
+coverage.xml
+
+# Type checking and linting caches
+.mypy_cache
+.pytype
+.ruff_cache
+
+# Documentation build
+docs/_build
+
+# CI/CD and config not needed at runtime
+.github
+.pre-commit-config.yaml
+.importlinter
+commitlint.json
+pyrightconfig.json
+cspell.json
+
+# Lock file (not needed for Docker pip install)
+uv.lock
+
+# Scripts and misc
+scripts
+setup.sh
+LICENSE
+Untitled.base
+*.md
+
+# Environment files
+.env
+.envrc
+
+# OS artifacts
+.DS_Store
+Thumbs.db

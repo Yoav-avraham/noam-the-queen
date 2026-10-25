@@ -1,0 +1,26 @@
+flowchart LR
+    CLIENT["Anashim"]
+    API["API Service"]
+    STORAGE["Storage"]
+    INFERENCE["Inference Layer"]
+    LLM["LLM Summarization"]
+    ORCHESTRATOR["Orchestrator Layer"]
+
+    CLIENT --> API
+    API --> STORAGE
+    API --> ORCHESTRATOR
+    INFERENCE <--> ORCHESTRATOR
+    ORCHESTRATOR <--> LLM
+    ORCHESTRATOR --> API
+
+    classDef c1 fill:#FFF3E8,stroke:#D86B1A,color:#3D2B1F,stroke-width:1.5px;
+    classDef c2 fill:#EAF4FF,stroke:#2563EB,color:#102A43,stroke-width:1.5px;
+    classDef c3 fill:#EEFCEE,stroke:#2F855A,color:#1C4532,stroke-width:1.5px;
+    classDef c4 fill:#F5F0FF,stroke:#6B46C1,color:#322659,stroke-width:1.5px;
+
+    class CLIENT c1;
+    class API c2;
+    class STORAGE c3;
+    class INFERENCE c2;
+    class LLM c4;
+    class ORCHESTRATOR c1;

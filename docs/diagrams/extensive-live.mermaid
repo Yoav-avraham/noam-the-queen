@@ -1,0 +1,97 @@
+%%{init: {'theme': 'Redux Dark', 'themeVariables': {'background': '#747474', 'lineColor': '#ffffff', 'textColor': '#000000'}}}%%
+flowchart LR
+    subgraph ClientSide[Client Side]
+        C1[Client]
+    end
+
+    subgraph StreamAPI[StreamAPI Consumer Group]
+        API[StreamAPI Consumers + Pods]
+    end
+
+    subgraph Storage[Storage and State Management]
+        MINIO[(MinIO Raw Audio)]
+        PG[(Postgres Session and Transcript)]
+        subgraph REDIS[Redis Instance]
+            subgraph  RedisFIFO[Redis FIFO Queue]
+                FIFO[[FIFO: Session Stream]]
+                CLEANUP{{Pop ID from FIFO - INTERNAL STEP}}
+            end
+            ACK_API[("stream:ReadyAudio:{SessionId}")]
+            ACK_IA[("stream:TritonOutput:{SessionId}")]
+            ACK_SYNC[("stream:FinalOutput:{SessionId}")]
+        end
+    end
+
+    subgraph Inference[Inference Consumer Group]
+        ADAPTER[InferenceAdapter Consumers + Pods]
+    end
+
+    TRITON[Triton: Pyannote + Whisper]
+
+    subgraph SyncLayer[Synchronizer Consumer Group]
+        SYNC[Synchronizer Consumer Group + Pods]
+    end
+
+    %% Client to API
+    C1 -->|1. gRPC audio stream| API
+    API -->|2a. raw chunks| MINIO
+    API -->|2b. session create| PG
+
+    %% Redis FIFO Initialization
+    API -->|2c. Push new Session ID| FIFO
+
+    %% Consumers pulling from FIFO for work planning
+    FIFO -->|3a. Consumers pull IDs| ADAPTER
+    FIFO -->|3b. Consumers pull IDs| SYNC
+
+    %% Inference Logic (VAD moved here)
+    ADAPTER -->|4. audio chunks to batched vectors| TRITON
+    TRITON -->|5. diarization and STT outputs| ADAPTER
+
+    %% Acknowledgment and Value Publishing Flows
+    API -->|6. Work done & ACK| ACK_API
+    ADAPTER -->|7. Work done & ACK| ACK_IA
+    SYNC -->|8. Merge logic done & ACK| ACK_SYNC
+
+    %% Output back to client via API relay
+    ACK_SYNC -->|9. incremental final text| API
+    API -->|10. stream to client| C1
+
+    %% The Garbage Collection / Removal Logic
+    ACK_API -->|11a. Wait for all 3| CLEANUP
+    ACK_IA -->|11b. Wait for all 3| CLEANUP
+    ACK_SYNC -->|11c. Wait for all 3| CLEANUP
+    CLEANUP -->|12. Remove Session ID| FIFO
+
+    %% Styling
+    classDef client fill:#f6d6e5,stroke:#ffffff,stroke-width:2px,color:#111827
+    classDef api fill:#fbd8c0,stroke:#ffffff,stroke-width:2px,color:#111827
+    classDef vad fill:#f9edbf,stroke:#ffffff,stroke-width:2px,color:#111827
+    classDef minio fill:#d2efe8,stroke:#ffffff,stroke-width:2px,color:#111827
+    classDef postgres fill:#d7e8fb,stroke:#ffffff,stroke-width:2px,color:#111827
+    classDef redisQ fill:#e4ddfb,stroke:#ffffff,stroke-width:2px,color:#111827
+    classDef adapter fill:#d7ecd1,stroke:#ffffff,stroke-width:2px,color:#111827
+    classDef triton fill:#fde4d3,stroke:#ffffff,stroke-width:2px,color:#111827
+    classDef sync fill:#d5eef8,stroke:#ffffff,stroke-width:2px,color:#111827
+    classDef cleanup fill:#ffcccb,stroke:#ffffff,stroke-width:2px,color:#111827
+
+    class C1 client
+    class API,GRPC api
+    class VAD vad
+    class MINIO minio
+    class PG postgres
+    class FIFO,ACK_API,ACK_IA,ACK_SYNC redisQ
+    class ADAPTER adapter
+    class TRITON triton
+    class SYNC sync
+    class CLEANUP cleanup
+
+    style ClientSide fill:#6f2349,stroke:#f8cada,stroke-width:2px,color:#ffffff
+    style StreamAPI fill:#764018,stroke:#f7ccab,stroke-width:2px,color:#ffffff
+    style Storage fill:#1d3557,stroke:#bfd0ef,stroke-width:2px,color:#ffffff
+    style REDIS fill:#3d2d67,stroke:#daccfb,stroke-width:2px,color:#ffffff
+    style Inference fill:#23482c,stroke:#bfe2b7,stroke-width:2px,color:#ffffff
+    style SyncLayer fill:#125466,stroke:#bce7f1,stroke-width:2px,color:#ffffff
+    style RedisFIFO fill:#5a189a,stroke:#e0b0ff,stroke-width:2px,color:#ffffff
+
+    linkStyle default stroke:#ffffff,stroke-width:3px

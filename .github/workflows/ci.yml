@@ -1,0 +1,14 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "main"
+  pull_request:
+    branches:
+      - "main"
+
+jobs:
+  call-shared-ci:
+    name: graft
+    uses: YhaliWaizman/graft/.github/workflows/reusable-go-ci.yml@main

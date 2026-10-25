@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>STT Black — Transcription UI</title>
+    <script src="/static/socket.io.min.js"></script>
+    <style>
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+            background: #0f1117;
+            color: #e2e8f0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+
+        .card {
+            background: #1a1d27;
+            border: 1px solid #2d3148;
+            border-radius: 12px;
+            padding: 2rem;
+            width: 100%;
+            max-width: 680px;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        h1 {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #a5b4fc;
+            letter-spacing: -0.01em;
+        }
+
+        .row {
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .field {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            flex: 1;
+            min-width: 160px;
+        }
+
+        label {
+            font-size: 0.78rem;
+            font-weight: 500;
+            color: #94a3b8;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        input,
+        select {
+            background: #0f1117;
+            border: 1px solid #2d3148;
+            border-radius: 8px;
+            color: #e2e8f0;
+            font-size: 0.9rem;
+            padding: 0.5rem 0.75rem;
+            outline: none;
+            transition: border-color 0.15s;
+            width: 100%;
+        }
+
+        input:focus,
+        select:focus {
+            border-color: #6366f1;
+        }
+
+        select option {
+            background: #1a1d27;
+        }
+
+        .controls {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        button {
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+            padding: 0.55rem 1.25rem;
+            transition: opacity 0.15s, transform 0.1s;
+        }
+
+        button:active {
+            transform: scale(0.97);
+        }
+
+        button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        #btn-record {
+            background: #6366f1;
+            color: #fff;
+        }
+
+        #btn-record.recording {
+            background: #ef4444;
+            animation: pulse 1.4s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.7;
+            }
+        }
+
+        #btn-send {
+            background: #22c55e;
+            color: #fff;
+        }
+
+        #btn-file {
+            background: #334155;
+            color: #e2e8f0;
+        }
+
+        #btn-clear {
+            background: transparent;
+            border: 1px solid #2d3148;
+            color: #94a3b8;
+        }
+
+        .indicator {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.82rem;
+            color: #64748b;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #64748b;
+            flex-shrink: 0;
+        }
+
+        .dot.ready {
+            background: #22c55e;
+        }
+
+        .dot.recording {
+            background: #ef4444;
+            animation: pulse 1.4s ease-in-out infinite;
+        }
+
+        .dot.sending {
+            background: #f59e0b;
+        }
+
+        .dot.error {
+            background: #ef4444;
+        }
+
+        .log {
+            background: #0f1117;
+            border: 1px solid #2d3148;
+            border-radius: 8px;
+            padding: 1rem;
+            font-size: 0.82rem;
+            line-height: 1.6;
+            min-height: 80px;
+            max-height: 260px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .log-entry {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .log-time {
+            color: #475569;
+            flex-shrink: 0;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .log-text {
+            color: #cbd5e1;
+            word-break: break-word;
+        }
+
+        .log-text.accent {
+            color: #a5b4fc;
+        }
+
+        .log-text.success {
+            color: #86efac;
+        }
+
+        .log-text.warn {
+            color: #fcd34d;
+        }
+
+        .log-text.error {
+            color: #fca5a5;
+        }
+
+        .section-label {
+            font-size: 0.78rem;
+            font-weight: 500;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.25rem;
+        }
+
+        .output-box {
+            background: #0f1117;
+            border: 1px solid #2d3148;
+            border-radius: 8px;
+            padding: 1rem;
+            font-size: 0.9rem;
+            line-height: 1.7;
+            min-height: 80px;
+            color: #e2e8f0;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .output-box.placeholder {
+            color: #475569;
+            font-style: italic;
+        }
+
+        .meter-wrap {
+            height: 4px;
+            background: #2d3148;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .meter-bar {
+            height: 100%;
+            background: #6366f1;
+            width: 0%;
+            transition: width 0.08s linear;
+        }
+
+        .badge {
+            display: inline-block;
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 0.15rem 0.5rem;
+            border-radius: 20px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .badge-info {
+            background: #1e3a5f;
+            color: #93c5fd;
+        }
+
+        .badge-success {
+            background: #14532d;
+            color: #86efac;
+        }
+
+        .badge-warn {
+            background: #422006;
+            color: #fcd34d;
+        }
+
+        .badge-error {
+            background: #450a0a;
+            color: #fca5a5;
+        }
+
+        .duration {
+            font-variant-numeric: tabular-nums;
+            font-size: 0.82rem;
+            color: #6366f1;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="card">
+        <h1>STT Black — Transcription UI</h1>
+
+        <div class="row">
+            <div class="field">
+                <label for="user-id">User ID</label>
+                <input id="user-id" type="text" value="dev-user" placeholder="e.g. alice" />
+            </div>
+            <div class="field">
+                <label for="participants">Participants (comma-separated)</label>
+                <input id="participants" type="text" value="dev-user" placeholder="alice, bob" />
+            </div>
+            <div class="field" style="min-width:140px; max-width:180px;">
+                <label for="meeting-type">Meeting Type</label>
+                <select id="meeting-type">
+                    <option value="1">Waiting (1)</option>
+                    <option value="2">Processing (2)</option>
+                    <option value="3" selected>Screening (3)</option>
+                    <option value="4">Done (4)</option>
+                    <option value="5">Failed (5)</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="field">
+            <label for="api-url">API URL</label>
+            <input id="api-url" type="text" value="http://localhost:8080" placeholder="http://localhost:8080" />
+        </div>
+
+        <div>
+            <div class="section-label">Audio</div>
+            <div class="meter-wrap" style="margin-bottom:0.6rem;">
+                <div class="meter-bar" id="meter-bar"></div>
+            </div>
+            <input type="file" id="file-input" accept="audio/*" style="display:none;" />
+            <div class="controls">
+                <button id="btn-record">⏺ Record</button>
+                <button id="btn-file">📁 File</button>
+                <button id="btn-send" disabled>↑ Send</button>
+                <button id="btn-clear">✕ Clear</button>
+                <div class="indicator">
+                    <div class="dot" id="status-dot"></div>
+                    <span id="status-text">Idle</span>
+                    <span class="duration" id="duration" style="display:none;"></span>
+                </div>
+            </div>
+        </div>
+
+        <div>
+            <div class="section-label">Events</div>
+            <div class="log" id="log">
+                <div class="log-entry"><span class="log-text" style="color:#475569;font-style:italic;">Events will
+                        appear here…</span></div>
+            </div>
+        </div>
+
+        <div>
+            <div class="section-label">Transcript</div>
+            <div class="output-box placeholder" id="transcript-box">No transcript yet.</div>
+        </div>
+
+        <div>
+            <div class="section-label">Summary</div>
+            <div class="output-box placeholder" id="summary-box">No summary yet.</div>
+        </div>
+    </div>
+
+    <script>
+        'use strict';
+
+        // ── DOM refs ──────────────────────────────────────────────────────────────────
+        const btnRecord = document.getElementById('btn-record');
+        const btnFile = document.getElementById('btn-file');
+        const fileInput = document.getElementById('file-input');
+        const btnSend = document.getElementById('btn-send');
+        const btnClear = document.getElementById('btn-clear');
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+        const durationEl = document.getElementById('duration');
+        const logEl = document.getElementById('log');
+        const transcriptBox = document.getElementById('transcript-box');
+        const summaryBox = document.getElementById('summary-box');
+        const meterBar = document.getElementById('meter-bar');
+
+        // ── State ─────────────────────────────────────────────────────────────────────
+        let audioCtx = null;
+        let mediaStream = null;
+        let sourceNode = null;
+        let processorNode = null;
+        let analyserNode = null;
+        let meterRafId = null;
+        let pcmChunks = [];      // Int16Array[]
+        let sampleRate = 16000;
+        let recordingStart = null;
+        let durationTimer = null;
+        let isRecording = false;
+        let socket = null;
+
+        // ── Logging ───────────────────────────────────────────────────────────────────
+        function log(text, cls = '') {
+            const now = new Date().toLocaleTimeString('en-GB', { hour12: false });
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">${now}</span><span class="log-text ${cls}">${text}</span>`;
+            if (logEl.firstChild && logEl.firstChild.querySelector && logEl.firstChild.querySelector('.log-text')?.style.color === 'rgb(71, 85, 105)') {
+                logEl.innerHTML = '';
+            }
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function setStatus(text, dotClass) {
+            statusText.textContent = text;
+            statusDot.className = `dot ${dotClass}`;
+        }
+
+        // ── Audio level meter ─────────────────────────────────────────────────────────
+        function startMeter() {
+            function tick() {
+                if (!analyserNode) return;
+                const buf = new Uint8Array(analyserNode.fftSize);
+                analyserNode.getByteTimeDomainData(buf);
+                let sum = 0;
+                for (let i = 0; i < buf.length; i++) {
+                    const v = (buf[i] - 128) / 128;
+                    sum += v * v;
+                }
+                const rms = Math.sqrt(sum / buf.length);
+                meterBar.style.width = `${Math.min(100, rms * 400)}%`;
+                meterRafId = requestAnimationFrame(tick);
+            }
+            meterRafId = requestAnimationFrame(tick);
+        }
+
+        function stopMeter() {
+            if (meterRafId) { cancelAnimationFrame(meterRafId); meterRafId = null; }
+            meterBar.style.width = '0%';
+        }
+
+        // ── Duration timer ─────────────────────────────────────────────────────────────
+        function startDurationTimer() {
+            recordingStart = Date.now();
+            durationEl.style.display = '';
+            durationTimer = setInterval(() => {
+                const s = ((Date.now() - recordingStart) / 1000).toFixed(1);
+                durationEl.textContent = `${s}s`;
+            }, 100);
+        }
+
+        function stopDurationTimer() {
+            clearInterval(durationTimer);
+            const s = recordingStart ? ((Date.now() - recordingStart) / 1000).toFixed(1) : '0';
+            durationEl.textContent = `${s}s`;
+        }
+
+        // ── Recording ─────────────────────────────────────────────────────────────────
+        async function startRecording() {
+            try {
+                mediaStream = await navigator.mediaDevices.getUserMedia({
+                    audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true }
+                });
+            } catch (err) {
+                log(`Microphone access denied: ${err.message}`, 'error');
+                return;
+            }
+
+            // Prefer 16 kHz; browser may choose a nearby rate.
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+            sampleRate = audioCtx.sampleRate;
+
+            analyserNode = audioCtx.createAnalyser();
+            analyserNode.fftSize = 256;
+
+            sourceNode = audioCtx.createMediaStreamSource(mediaStream);
+
+            // ScriptProcessorNode captures raw PCM float32 from the mic.
+            processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
+            pcmChunks = [];
+
+            processorNode.onaudioprocess = (e) => {
+                const float32 = e.inputBuffer.getChannelData(0);
+                const int16 = new Int16Array(float32.length);
+                for (let i = 0; i < float32.length; i++) {
+                    const clamped = Math.max(-1, Math.min(1, float32[i]));
+                    int16[i] = clamped < 0 ? clamped * 32768 : clamped * 32767;
+                }
+                pcmChunks.push(int16);
+            };
+
+            sourceNode.connect(analyserNode);
+            sourceNode.connect(processorNode);
+            processorNode.connect(audioCtx.destination);
+
+            isRecording = true;
+            btnRecord.textContent = '⏹ Stop';
+            btnRecord.classList.add('recording');
+            btnSend.disabled = true;
+            setStatus('Recording…', 'recording');
+            startMeter();
+            startDurationTimer();
+            log('Recording started', 'accent');
+        }
+
+        function stopRecording() {
+            if (!isRecording) return;
+
+            processorNode?.disconnect();
+            sourceNode?.disconnect();
+            analyserNode?.disconnect();
+            mediaStream?.getTracks().forEach(t => t.stop());
+            audioCtx?.close();
+
+            processorNode = null;
+            sourceNode = null;
+            analyserNode = null;
+            mediaStream = null;
+            audioCtx = null;
+            isRecording = false;
+
+            stopMeter();
+            stopDurationTimer();
+            btnRecord.textContent = '⏺ Record';
+            btnRecord.classList.remove('recording');
+
+            const totalSamples = pcmChunks.reduce((n, c) => n + c.length, 0);
+            if (totalSamples === 0) {
+                setStatus('No audio captured', 'error');
+                log('No audio captured', 'warn');
+                return;
+            }
+
+            const duration = (totalSamples / sampleRate).toFixed(2);
+            log(`Recording stopped — ${duration}s @ ${sampleRate} Hz, ${totalSamples} samples`, 'success');
+            setStatus(`Ready — ${duration}s recorded`, 'ready');
+            btnSend.disabled = false;
+        }
+
+        // ── File upload & decode ───────────────────────────────────────────────────────
+        async function handleFileUpload(file) {
+            log(`Decoding: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`, 'accent');
+            setStatus('Decoding…', 'sending');
+            btnFile.disabled = true;
+            btnRecord.disabled = true;
+            btnSend.disabled = true;
+
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+
+                // Decode at native rate first
+                const tmpCtx = new AudioContext();
+                const decoded = await tmpCtx.decodeAudioData(arrayBuffer);
+                await tmpCtx.close();
+
+                // Resample to 16 kHz mono via OfflineAudioContext
+                const TARGET_RATE = 16000;
+                const targetLength = Math.ceil(decoded.duration * TARGET_RATE);
+                const offline = new OfflineAudioContext(1, targetLength, TARGET_RATE);
+                const src = offline.createBufferSource();
+                src.buffer = decoded;
+                src.connect(offline.destination);
+                src.start(0);
+                const rendered = await offline.startRendering();
+
+                const float32 = rendered.getChannelData(0);
+                const int16 = new Int16Array(float32.length);
+                for (let i = 0; i < float32.length; i++) {
+                    const c = Math.max(-1, Math.min(1, float32[i]));
+                    int16[i] = c < 0 ? c * 32768 : c * 32767;
+                }
+
+                pcmChunks = [int16];
+                sampleRate = TARGET_RATE;
+
+                const duration = decoded.duration.toFixed(2);
+                log(`Decoded — ${duration}s, resampled to ${TARGET_RATE} Hz mono`, 'success');
+                setStatus(`Ready — ${duration}s from file`, 'ready');
+                durationEl.textContent = `${duration}s`;
+                durationEl.style.display = '';
+                btnSend.disabled = false;
+            } catch (err) {
+                log(`Decode failed: ${err.message}`, 'error');
+                setStatus('Decode error', 'error');
+            } finally {
+                btnFile.disabled = false;
+                btnRecord.disabled = false;
+                fileInput.value = '';
+            }
+        }
+
+        // ── PCM assembly ───────────────────────────────────────────────────────────────
+        function assemblePcm() {
+            const total = pcmChunks.reduce((n, c) => n + c.length, 0);
+            const merged = new Int16Array(total);
+            let offset = 0;
+            for (const chunk of pcmChunks) {
+                merged.set(chunk, offset);
+                offset += chunk.length;
+            }
+            return new Uint8Array(merged.buffer);
+        }
+
+        // ── Socket.IO connection ───────────────────────────────────────────────────────
+        function disconnectSocket() {
+            if (socket) {
+                socket.disconnect();
+                socket = null;
+            }
+        }
+
+        // ── Send ──────────────────────────────────────────────────────────────────────
+        async function send() {
+            const userId = document.getElementById('user-id').value.trim();
+            const rawParts = document.getElementById('participants').value;
+            const meetingType = parseInt(document.getElementById('meeting-type').value, 10);
+            const apiUrl = document.getElementById('api-url').value.trim().replace(/\/$/, '');
+
+            if (!userId) { log('User ID is required', 'error'); return; }
+
+            const participantIds = rawParts.split(',').map(s => s.trim()).filter(Boolean);
+            if (participantIds.length === 0) { log('At least one participant is required', 'error'); return; }
+
+            const audio = assemblePcm();
+            if (audio.length === 0) { log('No audio to send', 'error'); return; }
+
+            btnSend.disabled = true;
+            btnRecord.disabled = true;
+            transcriptBox.textContent = '';
+            transcriptBox.classList.add('placeholder');
+            summaryBox.textContent = '';
+            summaryBox.classList.add('placeholder');
+            setStatus('Authorising…', 'sending');
+
+            // 1. Get token
+            let token;
+            try {
+                const res = await fetch(`${apiUrl}/v1/authorize/${encodeURIComponent(userId)}`, { method: 'POST' });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const body = await res.json();
+                token = body.token;
+                log(`Token issued, expires ${body.expires_at}`, 'accent');
+            } catch (err) {
+                log(`Authorisation failed: ${err.message}`, 'error');
+                setStatus('Auth error', 'error');
+                btnSend.disabled = false;
+                btnRecord.disabled = false;
+                return;
+            }
+
+            setStatus('Connecting…', 'sending');
+
+            // 2. Connect via Socket.IO
+            disconnectSocket();
+            socket = io(apiUrl, {
+                auth: { token, user_id: userId },
+                transports: ['websocket'],
+            });
+
+            socket.on('connect_error', (err) => {
+                log(`Connection refused: ${err.message}`, 'error');
+                setStatus('Connection error', 'error');
+                btnSend.disabled = false;
+                btnRecord.disabled = false;
+            });
+
+            socket.on('connect', () => {
+                log('Connected to server', 'accent');
+                setStatus('Uploading…', 'sending');
+
+                // 3. Emit upload event
+                socket.emit('upload', {
+                    participant_ids: participantIds,
+                    meeting_type_id: meetingType,
+                    channels: 1,
+                    sample_width: 2,
+                    sample_rate: sampleRate,
+                    audio,
+                }, (ack) => {
+                    if (ack && ack.session_id) {
+                        log(`Session created: ${ack.session_id}`, 'success');
+                    } else if (ack && ack.error) {
+                        log(`Upload rejected: ${ack.error}`, 'error');
+                        setStatus('Upload rejected', 'error');
+                    }
+                });
+            });
+
+            socket.on('accepted', (data) => {
+                log(`Accepted — session: ${data.session_id}`, 'success');
+                setStatus('Processing…', 'sending');
+            });
+
+            socket.on('status', (data) => {
+                log(`Status: ${data.state} (${data.elapsed_s?.toFixed(1) ?? '?'}s elapsed)`, '');
+                setStatus(`${data.state} — ${data.elapsed_s?.toFixed(1) ?? '?'}s`, 'sending');
+            });
+
+            socket.on('transcript', (data) => {
+                transcriptBox.classList.remove('placeholder');
+                if (data.text) {
+                    transcriptBox.textContent = data.text;
+                } else {
+                    transcriptBox.textContent = '(empty transcript)';
+                }
+                const segCount = data.segments?.length ?? 0;
+                log(`Transcript received — ${segCount} segment(s), final: ${data.is_final}`, 'success');
+            });
+
+            socket.on('summary', (data) => {
+                summaryBox.classList.remove('placeholder');
+                const text = data?.text ?? JSON.stringify(data);
+                summaryBox.textContent = text || '(empty summary)';
+                log('Summary received', 'success');
+            });
+
+            socket.on('closed', (data) => {
+                log(`Session closed — status: ${data.status}`, 'accent');
+                setStatus(`Done — ${data.status}`, 'ready');
+                disconnectSocket();
+                btnRecord.disabled = false;
+            });
+
+            socket.on('error', (data) => {
+                log(`Error: [${data.code}] ${data.message}`, 'error');
+                setStatus(`Error: ${data.code}`, 'error');
+                disconnectSocket();
+                btnSend.disabled = false;
+                btnRecord.disabled = false;
+            });
+
+            socket.on('disconnect', (reason) => {
+                log(`Disconnected: ${reason}`, '');
+                btnRecord.disabled = false;
+            });
+        }
+
+        // ── Button handlers ───────────────────────────────────────────────────────────
+        btnRecord.addEventListener('click', () => {
+            if (isRecording) {
+                stopRecording();
+            } else {
+                startRecording();
+            }
+        });
+
+        btnSend.addEventListener('click', send);
+
+        btnFile.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', () => {
+            const file = fileInput.files?.[0];
+            if (file) handleFileUpload(file);
+        });
+
+        btnClear.addEventListener('click', () => {
+            disconnectSocket();
+            pcmChunks = [];
+            btnSend.disabled = true;
+            setStatus('Idle', '');
+            durationEl.style.display = 'none';
+            transcriptBox.textContent = 'No transcript yet.';
+            transcriptBox.classList.add('placeholder');
+            summaryBox.textContent = 'No summary yet.';
+            summaryBox.classList.add('placeholder');
+            logEl.innerHTML = '<div class="log-entry"><span class="log-text" style="color:#475569;font-style:italic;">Events will appear here…</span></div>';
+            btnRecord.disabled = false;
+            btnFile.disabled = false;
+            stopMeter();
+        });
+    </script>
+</body>
+
+</html>

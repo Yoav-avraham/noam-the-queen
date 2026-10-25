@@ -1,0 +1,16 @@
+ARG VERSION=3.12
+
+FROM python:${VERSION}-slim
+
+ARG SERVICE_NAME
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /build
+
+COPY common/ ./common/
+COPY services/${SERVICE_NAME}/pyproject.toml ./service/pyproject.toml
+
+RUN pip install --no-cache-dir ./common && \
+    pip install --no-cache-dir ./service

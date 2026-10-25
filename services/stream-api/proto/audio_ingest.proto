@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package stream_api.v1;
+
+// Public gRPC contract for stream-api ingestion and result routing.
+service AudioIngestService {
+  // Client-facing ingress stream.
+  rpc StreamAudio(stream AudioChunk) returns (stream ServerEvent);
+}
+
+// One inbound encoded audio chunk from client to stream-api.
+message AudioChunk {
+  bytes audio = 1;
+  string session_id = 2;
+  int32 channels = 3;
+  int32 sample_width = 4;
+  int32 sample_rate = 5;
+}
+
+// One outbound server event emitted on StreamAudio.
+message ServerEvent {
+  oneof event {
+    StreamAck ack = 1;
+    StreamError error = 2;
+    ConsumerResultEvent result = 3;
+  }
+}
+
+// Session acknowledgement emitted after StreamAudio is established.
+message StreamAck {
+  string session_id = 1;
+  string status = 2;
+}
+
+// Error payload emitted to client on unrecoverable stream failures.
+message StreamError {
+  string code = 1;
+  string message = 2;
+}
+
+// Transcription event sent from stream-api to connected consumer clients.
+message ConsumerResultEvent {
+  string session_id = 1;
+  string partial_text = 2;
+  bool is_final = 3;
+}
+
+// Transcription event sent from synchronizer into stream-api.
+message TranscriptionResultEvent {
+  string session_id = 1;
+  string partial_text = 2;
+  bool is_final = 3;
+}
+
+// Summary returned after synchronizer closes a result ingress stream.
+message ResultIngressSummary {
+  uint32 accepted = 1;
+  uint32 dropped = 2;
+}

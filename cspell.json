@@ -1,0 +1,41 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "words": [
+    "דובר",
+    "delenv",
+    "demux",
+    "docstrings",
+    "efgh",
+    "grpc",
+    "lineterm",
+    "minioadmin",
+    "onupdate",
+    "popleft",
+    "precommit",
+    "pylance",
+    "pyright",
+    "pytestmark",
+    "resampler",
+    "Ryuk",
+    "sanitises",
+    "serialisable",
+    "sess",
+    "sessionmaker",
+    "stt",
+    "synchronizer",
+    "tofile",
+    "Triton",
+    "uv",
+    "vllm",
+    "yhali"
+  ],
+  "ignorePaths": [
+    ".git",
+    ".venv",
+    "**/__pycache__",
+    "**/*.lock",
+    "**/proto/*_pb2.py",
+    "**/proto/*_pb2_grpc.py"
+  ]
+}

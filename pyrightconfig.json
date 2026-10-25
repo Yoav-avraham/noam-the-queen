@@ -1,0 +1,109 @@
+{
+  "pythonVersion": "3.12",
+  "venvPath": ".",
+  "venv": ".venv",
+  "typeCheckingMode": "basic",
+  "include": [
+    "common/src",
+    "services/stream-api/src",
+    "services/synchronizer/src",
+    "services/inference/src",
+    "services/rest-api/src"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/.venv",
+    "**/*_pb2.py",
+    "**/*_pb2_grpc.py"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "common/src"
+    },
+    {
+      "root": "common/tests",
+      "extraPaths": [
+        "common/src"
+      ]
+    },
+    {
+      "root": "services/stream-api/src",
+      "extraPaths": [
+        "common/src"
+      ]
+    },
+    {
+      "root": "services/stream-api/tests",
+      "extraPaths": [
+        "services/stream-api/src",
+        "common/src"
+      ]
+    },
+    {
+      "root": "services/synchronizer/src",
+      "extraPaths": [
+        ".",
+        "common/src"
+      ]
+    },
+    {
+      "root": "services/synchronizer/tests",
+      "extraPaths": [
+        "services/synchronizer/src",
+        "common/src"
+      ]
+    },
+    {
+      "root": "services/inference/src",
+      "extraPaths": [
+        "common/src"
+      ]
+    },
+    {
+      "root": "services/inference/tests",
+      "extraPaths": [
+        "services/inference/src",
+        "common/src"
+      ]
+    },
+    {
+      "root": "services/rest-api/src",
+      "extraPaths": [
+        "common/src"
+      ]
+    },
+    {
+      "root": "services/rest-api/src/rest_api/tests",
+      "extraPaths": [
+        "services/rest-api/src",
+        "common/src"
+      ]
+    },
+	{
+			"root": "services/inference/src",
+			"extraPaths": [
+				"common/src"
+			]
+		},
+		{
+			"root": "services/inference/src/inference/tests",
+			"extraPaths": [
+				"services/inference/src",
+				"common/src"
+			]
+		},
+		{
+			"root": "services/inference-adapter/src",
+			"extraPaths": [
+				"common/src"
+			]
+		},
+		{
+			"root": "services/inference-adapter/src/inference_adapter/tests",
+			"extraPaths": [
+				"services/inference-adapter/src",
+				"common/src"
+			]
+		},
+  ]
+}

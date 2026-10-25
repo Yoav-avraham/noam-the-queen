@@ -1,0 +1,23 @@
+{
+	"newFileLocation": "folder",
+	"newFileFolderPath": "docs",
+	"attachmentFolderPath": "docs/assets",
+	"userIgnoreFilters": [
+		".git/",
+		".github/",
+		".vscode/",
+		".venv/",
+		"common/",
+		"scripts/",
+		"services/",
+		"commitlint.json",
+		"cspell.json",
+		"docker-compose.yaml",
+		"LICENSE",
+		"pyproject.toml",
+		"pyrightconfig.json",
+		"README.md",
+		"setup.sh",
+		"uv.lock"
+	]
+}

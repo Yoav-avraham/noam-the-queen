@@ -1,0 +1,83 @@
+[project]
+name = "stt-black"
+version = "0.1.0"
+description = "Speech-to-text platform monorepo"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+	"pyright>=1.1.401,<1.1.411",
+]
+
+[tool.uv.workspace]
+members = [
+	"common",
+	"services/stream-api",
+	"services/synchronizer",
+	"services/inference-adapter",
+	"services/rest-api",
+]
+
+[tool.uv.sources]
+stt-common = { workspace = true }
+
+[dependency-groups]
+dev = [
+	"ruff>=0.11.8",
+	"pyright>=1.1.401,<1.1.411",
+	"pytest>=9.0.3",
+	"pytest-cov>=6.1.1",
+	"import-linter>=2.11",
+	"types-grpcio",
+	"grpcio>=1.80.0",
+	"grpcio-tools>=1.80.0",
+	"protobuf>=6.30.2",
+	"pre-commit>=3.0.0",
+	"pre-commit-hooks>=6.0.0",
+	"pytest-asyncio>=0.24.0",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 120
+src = ["common/src", "services/stream-api/src", "services/synchronizer/src", "services/inference/src", "services/inference-adapter/src", "services/rest-api/src"]
+exclude = [
+	"**/*_pb2.py",
+	"**/*_pb2_grpc.py",
+	"**/*_pb2.pyi",
+	"services/rest-api/migrations/versions/*.py",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+# TODO: Add blank-line rules (before/after control-flow blocks, before returns)
+# once https://github.com/astral-sh/ruff/issues/18255 is resolved.
+# See docs/contributor/engineering-standards.md for the style guide.
+
+[tool.ruff.lint.isort]
+known-first-party = ["stt_common", "stream_api", "synchronizer", "inference", "inference_adapter", "rest_api"]
+section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+length-sort = true
+length-sort-straight = true
+force-sort-within-sections = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra --strict-markers --import-mode=importlib"
+pythonpath = [
+	".",
+	"common/src",
+]
+testpaths = [
+	"common/tests",
+	"common/src/stt_common/tests",
+	"services/stream-api/src/stream_api/tests",
+	"services/synchronizer/src/synchronizer/tests",
+	"services/inference/src/inference/tests",
+	"services/inference-adapter/src/inference_adapter/tests",
+	"services/rest-api/src/rest_api/tests",
+	"tests",
+]
+markers = [
+	"integration: marks tests requiring infra/services",
+]
+asyncio_mode = "strict"

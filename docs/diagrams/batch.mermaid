@@ -1,0 +1,32 @@
+flowchart LR
+    CLIENT[Client Application]
+    API[REST API]
+    LLM[LLM Summarization]
+    TRITON[Triton Inference<br/>Pyannote + Whisper]
+    subgraph STORE[Data Storage]
+        S3[(S3/MinIO)]
+        PG[(Postgres)]
+    end
+
+    CLIENT -->|HTTP POST audio| API
+    API -->|Inference request| TRITON
+    TRITON -->|Model outputs| API
+    API -->|JSON results| CLIENT
+    API <-->|Summarization| LLM
+
+    API -->|Archive audio| S3
+    API -->|Session and results| PG
+
+    classDef client fill:#f6d6e5,stroke:#6b4a59,stroke-width:2px,color:#111827
+    classDef api fill:#fbd8c0,stroke:#7b5b49,stroke-width:2px,color:#111827
+    classDef triton fill:#d7ecd1,stroke:#4e6e49,stroke-width:2px,color:#111827
+    classDef store fill:#d7e8fb,stroke:#4a6482,stroke-width:2px,color:#111827
+    classDef llm fill:#fef3c7,stroke:#b8860b,stroke-width:2px,color:#111827
+
+    class CLIENT client
+    class API api
+    class TRITON triton
+    class LLM llm
+    class S3,PG store
+
+    style STORE fill:#e8f1f8,stroke:#7a9abb,stroke-width:2px,color:#111827

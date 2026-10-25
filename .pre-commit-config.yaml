@@ -1,0 +1,101 @@
+fail_fast: true
+
+repos:
+  # Conventional commits validation
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v3.1.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: []
+
+  # Python: Ruff (linting and formatting)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.8
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # Python: Type checking with pyright (module form to avoid blocked launcher executables)
+  - repo: local
+    hooks:
+      - id: pyright-module
+        name: pyright (python -m)
+        entry: .venv/bin/python -m pyright
+        language: system
+        pass_filenames: false
+
+  # Python: Architectural boundaries with import-linter
+  - repo: local
+    hooks:
+      - id: import-linter
+        name: import-linter
+        entry: .venv/bin/python -m importlinter.cli
+        language: system
+        pass_filenames: false
+
+  # Pre-push gates: redis check → coverage → integration tests
+  # TODO: Add --cov=stt_common once we have code in that package (same for other modules)
+  - repo: local
+    hooks:
+      - id: regenerate-proto
+        name: regenerate proto
+        entry: bash scripts/regen_proto.sh
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        verbose: true
+      - id: redis-check
+        name: redis reachable
+        entry: .venv/bin/python scripts/check_redis.py
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+        verbose: true
+      - id: coverage-gate
+        name: coverage gate
+        entry: .venv/bin/python -m pytest -m "not integration" --cov-report=term-missing --cov-fail-under=80
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+      - id: integration-tests
+        name: integration tests
+        entry: .venv/bin/python -m pytest -m integration
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
+
+  # General file checks (local system hooks to avoid ASR-blocked downloaded executables)
+  - repo: local
+    hooks:
+      - id: trailing-whitespace
+        name: trim trailing whitespace
+        entry: .venv/bin/python -m pre_commit_hooks.trailing_whitespace_fixer
+        language: system
+        types: [text]
+      - id: end-of-file-fixer
+        name: fix end of files
+        entry: .venv/bin/python -m pre_commit_hooks.end_of_file_fixer
+        language: system
+        types: [text]
+      - id: check-yaml
+        name: check yaml
+        entry: .venv/bin/python -m pre_commit_hooks.check_yaml
+        language: system
+        types: [yaml]
+      - id: check-added-large-files
+        name: check for added large files
+        entry: .venv/bin/python -m pre_commit_hooks.check_added_large_files
+        args: [--maxkb=1000]
+        language: system
+      - id: check-merge-conflict
+        name: check for merge conflicts
+        entry: .venv/bin/python -m pre_commit_hooks.check_merge_conflict
+        language: system
+        types: [text]
+      - id: mixed-line-ending
+        name: mixed line ending
+        entry: .venv/bin/python -m pre_commit_hooks.mixed_line_ending
+        language: system
+        types: [text]

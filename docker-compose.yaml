@@ -1,0 +1,230 @@
+version: "3.8"
+
+services:
+  # --- Infrastructure ---
+  redis:
+    image: stt-redis:8-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks:
+      - stt-net
+
+  postgres:
+    image: postgresql:17.4.0-debian-12-r10
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: dev_user
+      POSTGRES_PASSWORD: dev_password
+      POSTGRES_DB: stt_db
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - stt-net
+
+  # minio:
+  #   image: minio/minio:latest
+  #   command: server /data --console-address ":9001"
+  #   restart: unless-stopped
+  #   ports:
+  #     - "9000:9000"   # S3 API
+  #     - "9001:9001"   # Web console
+  #   environment:
+  #     MINIO_ROOT_USER: minioadmin
+  #     MINIO_ROOT_PASSWORD: minioadmin
+  #   healthcheck:
+  #     test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 10
+  #     start_period: 10s
+  #   volumes:
+  #     - minio-data:/data
+  #   networks:
+  #     - stt-net
+
+  # --- Inference ---
+  # triton:
+  #   build:
+  #     context: ./services/inference
+  #   # Strict mode: Triton is GPU-required in this stack definition.
+  #   gpus: all
+  #   restart: unless-stopped
+  #   ports:
+  #     - "8000:8000"
+  #     - "8001:8001"
+  #     - "8002:8002"
+  #   environment:
+  #     LD_LIBRARY_PATH: /opt/tritonserver/lib
+  #   healthcheck:
+  #     test:
+  #       [
+  #         "CMD-SHELL",
+  #         "wget -q -O /dev/null http://127.0.0.1:8000/v2/health/ready || curl -fsS http://127.0.0.1:8000/v2/health/ready >/dev/null",
+  #       ]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 12
+  #     start_period: 20s
+  #   depends_on:
+  #     redis:
+  #       condition: service_healthy
+  #   networks:
+  #     - stt-net
+
+  # --- Application Services ---
+  stream-api:
+    build:
+      context: .
+      dockerfile: services/stream-api/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "50051:50051"
+    environment:
+      STREAM_API_HOST: 0.0.0.0
+      STREAM_API_PORT: "50051"
+      REDIS_URL: redis://redis:6379/0
+      STREAM_API_FINAL_RESULT_WAIT_TIMEOUT_S: "12.0"
+      STREAM_API_CHUNK_PERSIST_TIMEOUT_S: "3.0"
+      STREAM_API_FINAL_OUTPUT_POLL_BLOCK_MS: "1000"
+      STREAM_API_OUTBOUND_QUEUE_MAXSIZE: "1024"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import socket; s=socket.create_connection((''127.0.0.1'', 50051), 2); s.close()"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - stt-net
+
+  inference-adapter:
+    build:
+      context: .
+      dockerfile: services/inference-adapter/Dockerfile
+    restart: unless-stopped
+    environment:
+      TRITON_URL: "localhost:8001"
+      REDIS_URL: redis://redis:6379/0
+      CONSUMER_GROUP_NAME: inference-adapter-workers
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "tr '\\000' ' ' < /proc/1/cmdline | grep -Eqi 'inference-adapter|inference_adapter'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      redis:
+        condition: service_healthy
+      # triton:
+      #   condition: service_healthy
+    networks:
+      - stt-net
+
+  synchronizer:
+    build:
+      context: .
+      dockerfile: services/synchronizer/Dockerfile
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      SYNCHRONIZER_CONSUMER_GROUP_NAME: synchronizer-workers
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "tr '\\000' ' ' < /proc/1/cmdline | grep -Eqi 'synchronizer'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      # minio:
+      #   condition: service_healthy
+      inference-adapter:
+        condition: service_healthy
+    networks:
+      - stt-net
+
+  rest-api:
+    build:
+      context: .
+      dockerfile: services/rest-api/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      REST_API_HOST: 0.0.0.0
+      REST_API_PORT: "8080"
+      REST_API_STREAM_API_TARGET: stream-api:50051
+      DATABASE_URL: postgresql+asyncpg://dev_user:dev_password@postgres:5432/stt_db
+      REST_API_S3_ENDPOINT_URL:
+      REST_API_S3_ACCESS_KEY:
+      REST_API_S3_SECRET_KEY:
+      REST_API_S3_BUCKET: data
+      VLLM_API_KEY: sk-
+      VLLM_MODEL: gpt-oss-120b
+      VLLM_BASE_URL: 
+      SUMMARIZATION_PROMPT_S3_KEY: prompt.md
+      # Override with a strong secret outside local development.
+      REST_API_TOKEN_SECRET: local-dev-secret
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'python -c "import socket; s=socket.create_connection((''127.0.0.1'', 8080), 2); s.close()"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    depends_on:
+      stream-api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      # minio:
+      #   condition: service_healthy
+    networks:
+      - stt-net
+
+volumes:
+  redis-data:
+  postgres-data:
+  minio-data:
+
+networks:
+  stt-net:
+    driver: bridge

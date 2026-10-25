@@ -1,0 +1,75 @@
+[importlinter]
+root_packages =
+    stream_api
+    synchronizer
+    inference
+    inference_adapter
+    rest_api
+    stt_common
+
+[importlinter:contract:stream-api-isolation]
+name = stream_api cannot import synchronizer or inference
+type = forbidden
+source_modules =
+    stream_api
+forbidden_modules =
+    synchronizer
+    inference
+    inference_adapter
+    rest_api
+
+[importlinter:contract:synchronizer-isolation]
+name = synchronizer cannot import stream_api or inference
+type = forbidden
+source_modules =
+    synchronizer
+forbidden_modules =
+    stream_api
+    inference
+    inference_adapter
+    rest_api
+
+[importlinter:contract:inference-isolation]
+name = inference cannot import stream_api or synchronizer
+type = forbidden
+source_modules =
+    inference
+forbidden_modules =
+    stream_api
+    synchronizer
+    inference_adapter
+    rest_api
+
+[importlinter:contract:inference-adapter-isolation]
+name = inference_adapter cannot import stream_api, synchronizer, or inference
+type = forbidden
+source_modules =
+    inference_adapter
+forbidden_modules =
+    stream_api
+    synchronizer
+    inference
+    rest_api
+
+[importlinter:contract:rest-api-isolation]
+name = rest_api cannot import other service packages
+type = forbidden
+source_modules =
+    rest_api
+forbidden_modules =
+    stream_api
+    synchronizer
+    inference
+    inference_adapter
+
+[importlinter:contract:common-service-separation]
+name = stt_common cannot import service packages
+type = forbidden
+source_modules =
+    stt_common
+forbidden_modules =
+    stream_api
+    synchronizer
+    inference
+    inference_adapter
+    rest_api

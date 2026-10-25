@@ -1,0 +1,27 @@
+{
+  "files.eol": "\n",
+  "files.insertFinalNewline": true,
+  "files.trimTrailingWhitespace": true,
+  "editor.formatOnSave": true,
+  "[python]": {
+    "editor.defaultFormatter": "charliermarsh.ruff"
+  },
+  "editor.codeActionsOnSave": {
+    "source.organizeImports.ruff": "explicit"
+  },
+  "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "python.testing.pytestArgs": [
+    "."
+  ],
+  "ruff.importStrategy": "fromEnvironment",
+  "ruff.organizeImports": true,
+  "ruff.severity": {
+    "I": "warning"
+  },
+  "git.path": "/usr/bin/git",
+  "cSpell.configFile": "${workspaceFolder}/cspell.json",
+  "files.exclude": {
+    "**/__pycache__": true
+  }
+}
