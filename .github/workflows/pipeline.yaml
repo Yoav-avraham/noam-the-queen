@@ -1,0 +1,29 @@
+name: Run Python Scripts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:   
+
+jobs:
+  run-scripts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Run first script
+        run: python scripts/bundle.py
+
+      - name: Run second script
+        run: python scripts/pull_changes.py
