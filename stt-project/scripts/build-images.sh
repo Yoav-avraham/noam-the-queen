@@ -33,6 +33,7 @@ mkdir -p "$OUTPUT_DIR"
 # Convert a service directory name to a Python module name (dashes → underscores)
 module_name() { echo "${1//-/_}"; }
 
+
 # Return 0 if the service uses the standard generic Python build pipeline:
 #   - Has a pyproject.toml (it's a Python package), AND
 #   - Either has no Dockerfile of its own, or its Dockerfile's FROM references
