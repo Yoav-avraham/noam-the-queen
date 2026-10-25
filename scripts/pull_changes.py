@@ -74,7 +74,7 @@ def copy_changed_files(
     return output_dir, copied
 
 def main():
-    print(output_dir, copied = copy_changed_files())
+    copy_changed_files()
     
     
 if __name__ == "__main__":
