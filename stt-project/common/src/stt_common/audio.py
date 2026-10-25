@@ -3,11 +3,14 @@ from __future__ import annotations
 import numpy as np
 from webrtcvad import Vad
 
+
 from stt_common.constants import MONO_CHANNELS, BYTES_PER_16BIT, SAMPLE_RATE_16KHZ
+
 
 VAD_MS = [10, 20, 30]
 TEN_MS = 10 / 1000
 SUPPORTED_VAD_SAMPLE_RATES = (8000, 16000, 32000, 48000)
+
 
 vad = Vad(2)
 
