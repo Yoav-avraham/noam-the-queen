@@ -23,7 +23,7 @@ jobs:
         run: pip install -r scripts/requirements.txt
 
       - name: Run first script
-        run: python scripts/bundle.py
+        run: python scripts/bundle.py export . --manylinux
 
       - name: Run second script
         run: python scripts/pull_changes.py
