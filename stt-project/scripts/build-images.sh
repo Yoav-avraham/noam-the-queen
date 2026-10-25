@@ -22,7 +22,9 @@ SERVICES_DIR="$REPO_ROOT/services"
 OUTPUT_DIR="$REPO_ROOT/archive"
 GENERIC_DOCKERFILE_DEPS="$REPO_ROOT/Dockerfile.deps"
 
+
 mkdir -p "$OUTPUT_DIR"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -43,6 +45,7 @@ is_standard_python_service() {
         grep -qE '^FROM\s+\S+-deps' "$dockerfile" || return 1
     fi
     return 0
+    
 }
 
 # ---------------------------------------------------------------------------
