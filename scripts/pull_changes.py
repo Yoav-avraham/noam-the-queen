@@ -42,8 +42,9 @@ def get_changes_since(commit, repo_path="."):
 
 
 def main():
+    commit = input("enter commit : -> ")
     
-    changed, deleted = get_changes_since("a75e33b", repo_path=".")
+    changed, deleted = get_changes_since(commit, repo_path=".")
 
     print("changed:", changed)
     print("deleted:", deleted)
