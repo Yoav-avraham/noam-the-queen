@@ -3,9 +3,7 @@ from __future__ import annotations
 import numpy as np
 from webrtcvad import Vad
 
-
 from stt_common.constants import MONO_CHANNELS, BYTES_PER_16BIT, SAMPLE_RATE_16KHZ
-
 
 VAD_MS = [10, 20, 30]
 TEN_MS = 10 / 1000
@@ -24,6 +22,7 @@ def resample_audio(audio: np.ndarray, sample_rate: int, output_dtype):
     audio = np.interp(new_indices, old_indices, audio).astype(output_dtype)
 
     return audio
+
 
 
 def normalize_audio(

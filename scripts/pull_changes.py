@@ -43,10 +43,10 @@ def get_changes_since(commit, repo_path="."):
 
 def main():
     
-    changed, deleted = get_changes_since("3afe2ae", repo_path=".")
+    changed, deleted = get_changes_since("a75e33b", repo_path=".")
 
-    print("שונו או נוצרו:", changed)
-    print("נמחקו:", deleted)
+    print("changed:", changed)
+    print("deleted:", deleted)
     
     
 if __name__ == "__main__":
