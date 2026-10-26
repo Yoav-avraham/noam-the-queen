@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
-  workflow_dispatch:   
+  workflow_dispatch:
 
 jobs:
   run-scripts:
@@ -29,3 +29,11 @@ jobs:
 
       - name: Run second script
         run: python scripts/pull_changes.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
