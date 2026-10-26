@@ -6,13 +6,11 @@ on:
   workflow_dispatch:
 
 jobs:
-  package:
+  dependencies:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout full repository
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -24,27 +22,50 @@ jobs:
       - name: Install dependencies
         run: pip install -r scripts/requirements.txt
 
-      # חייב לרוץ לפני bundle.py, ראה הסבר למטה
-      - name: Collect changed files
-        id: changes
-        run: python scripts/pull_changes.py
-
       - name: Build dependencies bundle
         run: python scripts/bundle.py export . --manylinux
 
-      - name: Upload changed files
-        uses: actions/upload-artifact@v4
-        with:
-          name: changed-files
-          path: ${{ steps.changes.outputs.output_dir }}
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload dependencies bundle
+      - name: Upload bundle (intermediate)
         uses: actions/upload-artifact@v4
         with:
           name: dependencies-bundle
           path: "*.tar.gz"
-          compression-level: 0   # הקובץ כבר דחוס, אין טעם לדחוס שוב
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+  code:
+    runs-on: ubuntu-latest
+    needs: dependencies
+    steps:
+      - name: Checkout full repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Collect changed files
+        id: changes
+        run: python scripts/pull_changes.py
+
+      - name: Download dependencies bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: dependencies-bundle
+          path: ${{ steps.changes.outputs.output_dir }}/dependencies
+
+      - name: Show output
+        run: find "${{ steps.changes.outputs.output_dir }}" -type f
+
+      - name: Upload final package
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-package
+          path: ${{ steps.changes.outputs.output_dir }}
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
