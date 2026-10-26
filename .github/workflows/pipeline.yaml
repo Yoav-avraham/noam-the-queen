@@ -25,7 +25,7 @@ jobs:
       - name: Build dependencies bundle
         run: python scripts/bundle.py export . --manylinux
 
-      - name: Upload bundle (intermediate)
+      - name: Upload dependencies bundle
         uses: actions/upload-artifact@v4
         with:
           name: dependencies-bundle
@@ -36,36 +36,100 @@ jobs:
 
   code:
     runs-on: ubuntu-latest
-    needs: dependencies
     steps:
       - name: Checkout full repository
         uses: actions/checkout@v4
+
+      - name: Export the full repository
+        run: |
+          mkdir -p code
+          git archive HEAD | tar -x -C code
+
+      - name: Upload code
+        uses: actions/upload-artifact@v4
         with:
-          fetch-depth: 0
+          name: code
+          path: code
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  images:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full repository
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - name: Collect changed files
-        id: changes
-        run: python scripts/pull_changes.py
+      - name: Find images in Dockerfiles
+        env:
+          # Values for variables used in FROM lines (e.g. python:${VERSION}-slim).
+          # Adjust to match your Dockerfiles.
+          VERSION: "3.12"
+        run: |
+          python scripts/find_docker_images.py . --lines > "$RUNNER_TEMP/images.txt"
+          echo "Images found:"
+          cat "$RUNNER_TEMP/images.txt"
+          if [ ! -s "$RUNNER_TEMP/images.txt" ]; then
+            echo "::error::No images found in Dockerfiles"
+            exit 1
+          fi
 
-      - name: Download dependencies bundle
+      - name: Pull images and docker save
+        run: |
+          mkdir -p images
+          saveable=()
+          while IFS= read -r image; do
+            if docker pull "$image"; then
+              saveable+=("$image")
+            elif docker image inspect "$image" > /dev/null 2>&1; then
+              saveable+=("$image")
+            else
+              echo "::warning::Could not pull '$image' (locally built or unresolved variable?) - skipping"
+            fi
+          done < "$RUNNER_TEMP/images.txt"
+
+          if [ "${#saveable[@]}" -eq 0 ]; then
+            echo "::error::No images could be pulled"
+            exit 1
+          fi
+
+          printf '%s\n' "${saveable[@]}" > images/images.txt
+          docker save -o images/docker-images.tar "${saveable[@]}"
+          ls -lh images
+
+      - name: Upload images
+        uses: actions/upload-artifact@v4
+        with:
+          name: images
+          path: images
+          compression-level: 0
+          if-no-files-found: error
+          retention-days: 1
+
+  package:
+    runs-on: ubuntu-latest
+    needs: [dependencies, code, images]
+    steps:
+      # With no "name", all artifacts of this run are downloaded,
+      # each into its own sub-folder: package/<artifact-name>/
+      - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
-          name: dependencies-bundle
-          path: ${{ steps.changes.outputs.output_dir }}/dependencies
+          path: package
 
       - name: Show output
-        run: find "${{ steps.changes.outputs.output_dir }}" -type f
+        run: find package -type f
 
       - name: Upload final package
         uses: actions/upload-artifact@v4
         with:
           name: final-package
-          path: ${{ steps.changes.outputs.output_dir }}
+          path: package
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14
