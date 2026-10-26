@@ -1,13 +1,12 @@
-name: Run Python Scripts
+name: Package Artifacts
 
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
 jobs:
-  run-scripts:
+  package:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout full repository
@@ -20,20 +19,32 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: scripts/requirements.txt
 
       - name: Install dependencies
         run: pip install -r scripts/requirements.txt
 
-      - name: Run first script
-        run: python scripts/bundle.py export . --manylinux
-
-      - name: Run second script
+      # חייב לרוץ לפני bundle.py, ראה הסבר למטה
+      - name: Collect changed files
+        id: changes
         run: python scripts/pull_changes.py
 
-      - name: Upload artifact
+      - name: Build dependencies bundle
+        run: python scripts/bundle.py export . --manylinux
+
+      - name: Upload changed files
         uses: actions/upload-artifact@v4
         with:
-          name: build-output
-          path: dist/
+          name: changed-files
+          path: ${{ steps.changes.outputs.output_dir }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload dependencies bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependencies-bundle
+          path: "*.tar.gz"
+          compression-level: 0   # הקובץ כבר דחוס, אין טעם לדחוס שוב
           if-no-files-found: error
           retention-days: 14
