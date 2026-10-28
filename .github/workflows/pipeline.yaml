@@ -70,11 +70,19 @@ jobs:
       - name: Show output
         run: find package -type f
 
+      - name: Archive, base64 and split into 25MB parts
+        run: |
+          mkdir -p final-package
+          tar -czf package.tar.gz -C package .
+          base64 -w 0 package.tar.gz > package.b64
+          split -b 25M -d -a 3 package.b64 final-package/package.b64.part-
+          ls -lh final-package
+
       - name: Upload final package
         uses: actions/upload-artifact@v4
         with:
           name: final-package
-          path: package
-          include-hidden-files: true
+          path: final-package
+          compression-level: 0
           if-no-files-found: error
           retention-days: 14
