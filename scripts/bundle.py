@@ -1,42 +1,25 @@
 import os
+import re
 import argparse
 import requests
 import json
+from datetime import datetime
 import tomllib
 import tarfile
 import shutil
 import subprocess
 import stat
-import tqdm
-import time
-from datetime import datetime
-from functools import wraps
-from concurrent.futures import ThreadPoolExecutor
-
-DOWNLOAD_WORKERS = 8
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 COMMIT_SHA = os.getenv("GITHUB_SHA") or "example-sha"
 
-def get_git_url():
-    """Resolve the repo URL dynamically: CI env vars first, then the origin remote."""
-    server = os.getenv("GITHUB_SERVER_URL")
-    repo = os.getenv("GITHUB_REPOSITORY")
-    if server and repo:
-        return f"{server}/{repo}.git"
-    return subprocess.run(
-        ["git", "remote", "get-url", "origin"],
-        capture_output=True, text=True, check=True,
-    ).stdout.strip()
+# True = download only Linux-compatible wheels (manylinux + platform-independent)
+ONLY_MANYLINUX = True
 
-def runtime_count(func):
-    @wraps(func)
-    def count(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        end_time = time.time()
-        print(f"Total time: {end_time - start_time:.2f} seconds")
-        return result
-    return count
+# Target python version as (major, minor), e.g. (3, 12). None = any version.
+# Can also be set from the CLI with --python-version 3.12
+PYTHON_VERSION = (3,12)
 
 def create_parser():
     """
@@ -52,9 +35,8 @@ def create_parser():
     export_parser.add_argument("project_path", help="Path to project directory")
     export_parser.add_argument("--no-cleanup", action="store_true", help="Keep extracted dependency folders after creating archives")
     export_parser.add_argument("--commit-sha" , help="Commit SHA to compare current dependencies against")
+    export_parser.add_argument("--python-version", help="Download only wheels compatible with this python version, e.g. 3.12")
     export_parser.add_argument("--latest-commit", action="store_true", help="Get the latest Commit SHA to compare current dependencies against")
-    export_parser.add_argument("--verbose", action="store_true", help="Print each dependency as it is downloaded instead of showing a progress bar")
-    export_parser.add_argument("--manylinux", action="store_true", help="Download only manylinux wheels (plus pure python wheels) for uv dependencies")
     
     # import parser
     import_parser = subparsers.add_parser("import", help="Import bundle archive")
@@ -62,7 +44,8 @@ def create_parser():
 
     return parser
 
-def validate_project_path(project_path):
+
+def validate_project_path(project_path: str):
     """
         The function validates the path of the project for export 
     """
@@ -78,7 +61,32 @@ def validate_project_path(project_path):
     return project_path
 
 
-def find_lock_files(project_path):
+def get_project_git_url(project_path: str) -> str:
+    """
+        Extracts the git remote origin url from the project path,
+        falling back to a default URL if not found.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "-C", project_path, "config", "--get", "remote.origin.url"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+        url = result.stdout.strip()
+        if url:
+            print(f"Detected git remote URL: {url}")
+            return url
+    except subprocess.CalledProcessError:
+        pass
+    
+    default_url = "https://github.com/Yoav-avraham/bundeling-tool.git"
+    print(f"Using default git URL: {default_url}")
+    return default_url
+
+
+def find_lock_files(project_path: str):
     """
         The function finds all of the lock files in the project
         and returns their paths
@@ -104,7 +112,7 @@ def find_lock_files(project_path):
     return npm_lock_files, uv_lock_files
 
 
-def extract_npm_dependencies(lock_path):
+def extract_npm_dependencies(lock_path: str):
     """
         The function takes the npm dependencies , their versions ,
         integrity and url
@@ -141,12 +149,12 @@ def extract_npm_dependencies(lock_path):
             "integrity": info.get("integrity")
         })
         
-        dependencies_set.add(f"{package_name}@{info.get("version")}")
+        dependencies_set.add(f"{package_name}@{info.get('version')}")
 
     return dependencies , dependencies_set
 
 
-def extract_uv_dependencies(lock_path):
+def extract_uv_dependencies(lock_path: str):
     """
         The function extracts uv dependencies from the lock file
     """
@@ -177,14 +185,57 @@ def extract_uv_dependencies(lock_path):
 
         # append to the dependencies list
         dependencies.append(package_data)
-        dependencies_set.add(f"{package.get("name")}@{package.get("version")}")
+        dependencies_set.add(f"{package.get('name')}@{package.get('version')}")
 
     return dependencies , dependencies_set
 
 
-def download_npm_dependencies(dependencies, output_dir, exists_set=None, verbose=False):
+def download_single_npm_dependency(dependency, output_dir, exists_set, lock):
     """
-        The function downloads the npm dependencies from the dependencies list
+        Downloads a single npm dependency
+    """
+    url = dependency.get("resolved")
+    package = f"{dependency.get('name', 'unknown')}@{dependency.get('version', '')}"
+
+    if not url:
+        print(f"Skipping {dependency.get('name')} no URL")
+        return package, True
+
+    with lock:
+        if package in exists_set:
+            print(f"Skipping {package} already exists")
+            return None, False
+
+    filename = (
+        dependency["name"].replace("/", "_")
+        + "-"
+        + dependency["version"]
+        + ".tgz"
+    )
+
+    file_path = os.path.join(output_dir, filename)
+
+    try:
+        response = requests.get(url, timeout=30)
+        response.raise_for_status()
+        with open(file_path, "wb") as file:
+            file.write(response.content)
+
+        print(f"Downloaded: {filename}")
+        with lock:
+            exists_set.add(package)
+        return None, False
+    except requests.RequestException as error:
+        print(f"Failed to download {package}: {error}")
+        return package, True
+    except OSError as error:
+        print(f"Failed to save {package}: {error}")
+        return package, True
+
+
+def download_npm_dependencies(dependencies, output_dir, exists_set=None, max_workers=10):
+    """
+        The function downloads the npm dependencies from the dependencies list using threads
     """
 
     if exists_set is None:
@@ -193,74 +244,196 @@ def download_npm_dependencies(dependencies, output_dir, exists_set=None, verbose
     os.makedirs(output_dir, exist_ok=True)
 
     failed_dependencies = []
-    skipped = []
-    errors = []
+    lock = threading.Lock()
 
-    def download_one(dependency):
-        """Returns (package, success) or None if skipped"""
-        url = dependency.get("resolved")
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_dep = {
+            executor.submit(
+                download_single_npm_dependency,
+                dep,
+                output_dir,
+                exists_set,
+                lock
+            ): dep
+            for dep in dependencies
+        }
 
-        if not url:
-            skipped.append(f"{dependency['name']} - no URL")
-            return None
+        for future in as_completed(future_to_dep):
+            failed_pkg, is_failed = future.result()
+            if is_failed and failed_pkg:
+                failed_dependencies.append(failed_pkg)
 
-        package = f"{dependency['name']}@{dependency['version']}"
-
-        if package in exists_set:
-            skipped.append(f"{package} - already exists")
-            return None
-
-        filename = (
-            dependency["name"].replace("/", "_")
-            + "-"
-            + dependency["version"]
-            + ".tgz"
+    if failed_dependencies:
+        print(
+            "Failed to download npm dependencies: "
+            + ", ".join(failed_dependencies)
         )
 
+    return failed_dependencies
+
+
+def is_linux_wheel(filename: str) -> bool:
+    """
+        The function checks if a wheel is usable on manylinux:
+        either a manylinux wheel or a pure python wheel (platform independent)
+    """
+    return "manylinux" in filename or filename.endswith("-none-any.whl")
+
+
+def parse_python_version(version: str):
+    """
+        The function parses a version string like "3.12" into a (major, minor) tuple
+    """
+    try:
+        major, minor = version.split(".")
+        return int(major), int(minor)
+    except ValueError:
+        raise ValueError(f"Invalid python version '{version}', expected format like 3.12")
+
+
+def is_python_compatible(filename: str, python_version) -> bool:
+    """
+        The function checks if a wheel can run on the given python version.
+        Wheel name format: name-version(-build)-pythontag-abitag-platformtag.whl
+        Matches: cp312 (exact), cp39 with abi3 (stable ABI, works on newer versions),
+        py3 / py3X (pure python, X <= target minor)
+    """
+    if python_version is None:
+        return True
+
+    major, minor = python_version
+
+    parts = filename[:-len(".whl")].split("-") if filename.endswith(".whl") else []
+    if len(parts) < 5:
+        return False
+
+    python_tags = parts[-3].split(".")
+    abi_tags = parts[-2].split(".")
+
+    for tag in python_tags:
+
+        # cpython wheels - cp312, cp39, ...
+        match = re.fullmatch(r"cp(\d)(\d+)", tag)
+        if match:
+            tag_major, tag_minor = int(match.group(1)), int(match.group(2))
+            if tag_major != major:
+                continue
+            if tag_minor == minor:
+                return True
+            if "abi3" in abi_tags and tag_minor < minor:
+                return True
+            continue
+
+        # generic python wheels - py3, py2.py3, py310, ...
+        match = re.fullmatch(r"py(\d)(\d*)", tag)
+        if match:
+            tag_major = int(match.group(1))
+            if tag_major != major:
+                continue
+            if match.group(2) == "" or int(match.group(2)) <= minor:
+                return True
+
+    return False
+
+
+def wheel_matches(filename: str) -> bool:
+    """
+        The function applies all of the wheel filters (manylinux and python version)
+    """
+    if ONLY_MANYLINUX and not is_linux_wheel(filename):
+        return False
+    return is_python_compatible(filename, PYTHON_VERSION)
+
+
+def download_single_uv_dependency(dependency, output_dir, exists_set, lock):
+    """
+        Downloads manylinux wheels and sdist for a single uv dependency
+    """
+    package = f"{dependency['name']}@{dependency['version']}"
+
+    with lock:
+        if package in exists_set:
+            print(f"Skipping: {package} already downloaded")
+            return None, False
+
+    dependency_failed = False
+    wheels = dependency.get("wheels", [])
+    sdist = dependency.get("sdist")
+
+    if not wheels and not sdist:
+        print(f"Skipping {package} no wheels or sdist found")
+        return package, True
+
+    # keep only wheels that match the filters (manylinux and python version)
+    if ONLY_MANYLINUX or PYTHON_VERSION:
+        wheels = [
+            wheel for wheel in wheels
+            if wheel.get("url") and wheel_matches(os.path.basename(wheel["url"]))
+        ]
+
+        # package has no matching wheels and no sdist - not a failure, just not relevant
+        if not wheels and not sdist:
+            print(f"Skipping {package} no matching wheels")
+            return None, False
+
+    for wheel in wheels:
+        url = wheel.get("url")
+
+        if not url:
+            print(f"Skipping {package} no URL")
+            dependency_failed = True
+            continue
+
+        filename = os.path.basename(url)
         file_path = os.path.join(output_dir, filename)
 
         try:
-            if verbose:
-                print(f"Downloading: {package}", flush=True)
-            download_file_with_progress(url, file_path)
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+            with open(file_path, "wb") as file:
+                file.write(response.content)
+
+            print(f"Downloaded: {filename}")
         except requests.RequestException as error:
-            errors.append(f"{package}: {error}")
-            return package, False
+            print(f"Failed to download {package}: {error}")
+            dependency_failed = True
+        except OSError as error:
+            print(f"Failed to save {package}: {error}")
+            dependency_failed = True
 
+    if sdist:
+        url = sdist.get("url")
+
+        if url:
+            filename = os.path.basename(url)
+            file_path = os.path.join(output_dir, filename)
+
+            if not os.path.exists(file_path):
+                try:
+                    response = requests.get(url, timeout=30)
+                    response.raise_for_status()
+                    with open(file_path, "wb") as file:
+                        file.write(response.content)
+
+                    print(f"Downloaded: {filename}")
+                except requests.RequestException as error:
+                    print(f"Failed to download {package}: {error}")
+                    dependency_failed = True
+                except OSError as error:
+                    print(f"Failed to save {package}: {error}")
+                    dependency_failed = True
+
+    if dependency_failed:
         return package, True
+    else:
+        with lock:
+            exists_set.add(package)
+        return None, False
 
-    with ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as executor:
-        results = executor.map(download_one, dependencies)
-        if not verbose:
-            results = tqdm.tqdm(
-                results,
-                total=len(dependencies),
-                desc="Downloading npm",
-                unit="pack",
-            )
-        for result in results:
-            if result is None:
-                continue
-            package, success = result
-            if success:
-                exists_set.add(package)
-            else:
-                failed_dependencies.append(package)
 
-    for item in skipped:
-        print(f"Skipped: {item}")
-    for item in errors:
-        print(f"Failed: {item}")
-
-    if failed_dependencies:
-        raise RuntimeError(
-            "Failed to download dependencies: "
-            + ", ".join(failed_dependencies)
-        )
-
-def download_uv_dependencies(dependencies, output_dir, exists_set=None, manylinux=False, verbose=False):
+def download_uv_dependencies(dependencies, output_dir, exists_set=None, max_workers=10):
     """
-        The function downloads the uv dependencies from the dependencies list
+        The function downloads the uv dependencies from the dependencies list using threads
     """
 
     if exists_set is None:
@@ -269,109 +442,33 @@ def download_uv_dependencies(dependencies, output_dir, exists_set=None, manylinu
     os.makedirs(output_dir, exist_ok=True)
 
     failed_dependencies = []
-    skipped = []
-    errors = []
+    lock = threading.Lock()
 
-    def download_one(dependency):
-        """Returns (package, success) or None if skipped"""
-        package = f"{dependency['name']}@{dependency['version']}"
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_to_dep = {
+            executor.submit(
+                download_single_uv_dependency,
+                dep,
+                output_dir,
+                exists_set,
+                lock
+            ): dep
+            for dep in dependencies
+        }
 
-        if package in exists_set:
-            skipped.append(f"{package} - already downloaded")
-            return None
-
-        dependency_failed = False
-
-        for wheel in dependency.get("wheels", []):
-
-            url = wheel.get("url")
-
-            if not url:
-                skipped.append(f"{package} - no URL")
-                dependency_failed = True
-                continue
-
-            filename = os.path.basename(url)
-
-            # with the manylinux flag, skip platform wheels that aren't manylinux
-            # (pure python "any" wheels are still needed)
-            if manylinux and "manylinux" not in filename and not filename.endswith("-any.whl"):
-                skipped.append(f"{filename} - not manylinux")
-                continue
-
-            file_path = os.path.join(output_dir, filename)
-
-            try:
-                if verbose:
-                    print(f"Downloading: {filename}", flush=True)
-                download_file_with_progress(url, file_path)
-            except requests.RequestException as error:
-                errors.append(f"{package}: {error}")
-                dependency_failed = True
-                continue
-
-
-        sdist = dependency.get("sdist")
-
-        if sdist:
-            url = sdist.get("url")
-
-            if url:
-                filename = os.path.basename(url)
-                file_path = os.path.join(output_dir, filename)
-
-                if not os.path.exists(file_path):
-                    try:
-                        if verbose:
-                            print(f"Downloading: {filename}", flush=True)
-                        download_file_with_progress(url, file_path)
-                    except requests.RequestException as error:
-                        errors.append(f"{package}: {error}")
-                        dependency_failed = True
-
-        return package, not dependency_failed
-
-    with ThreadPoolExecutor(max_workers=DOWNLOAD_WORKERS) as executor:
-        results = executor.map(download_one, dependencies)
-        if not verbose:
-            results = tqdm.tqdm(
-                results,
-                total=len(dependencies),
-                desc="Downloading uv",
-                unit="pack",
-            )
-        for result in results:
-            if result is None:
-                continue
-            package, success = result
-            if success:
-                exists_set.add(package)
-            else:
-                failed_dependencies.append(package)
-
-    for item in skipped:
-        print(f"Skipped: {item}")
-    for item in errors:
-        print(f"Failed: {item}")
+        for future in as_completed(future_to_dep):
+            failed_pkg, is_failed = future.result()
+            if is_failed and failed_pkg:
+                failed_dependencies.append(failed_pkg)
 
     if failed_dependencies:
-        raise RuntimeError(
-            "Failed to download dependencies: "
+        print(
+            "Failed to download uv dependencies: "
             + ", ".join(failed_dependencies)
         )
 
-def download_file_with_progress(url, file_path):
-    """
-    Downloads a single file from url to file_path (no per-file progress bar).
-    """
-    with requests.get(url, stream=True, timeout=30) as response:
-        response.raise_for_status()
-        block_size = 1024  # 1 KB
+    return failed_dependencies
 
-        with open(file_path, "wb") as file:
-            for chunk in response.iter_content(chunk_size=block_size):
-                if chunk:
-                    file.write(chunk)
 
 def gather_npm_dependencies_from_locks(lock_files):
     """
@@ -395,6 +492,7 @@ def gather_npm_dependencies_from_locks(lock_files):
         
     return npm_dependencies, npm_set
 
+
 def gather_uv_dependencies_from_lockfiles(lock_files):
     """
         The function takes a list of uv lock files and gather all of
@@ -415,16 +513,16 @@ def gather_uv_dependencies_from_lockfiles(lock_files):
         uv_set.update(dependencies_set)
         
     return uv_dependencies, uv_set
-        
-       
+         
+         
 
-def create_bundle_archive(source_dir, output_file):
+def create_bundle_archive(source_dir: str, output_file: str):
     """
         The function takes the directory that contains
         the dependencies and zip it into a bundle
     """
     try:
-        # create a gz gile
+        # create a gz file
         with tarfile.open(output_file, "w:gz") as tar:
             # add the dir 
             tar.add(source_dir, arcname=os.path.basename(source_dir))
@@ -435,12 +533,13 @@ def create_bundle_archive(source_dir, output_file):
         
     print(f"Bundle created: {output_file}")
 
-def create_dependencies_archive(source_dir, output_file):
+
+def create_dependencies_archive(source_dir: str, output_file: str):
     """
         The function creates an archive of every dependency
     """
     try:
-        # create a new gz fie and add all of the files in the dir
+        # create a new gz file and add all of the files in the dir
         with tarfile.open(output_file, "w:gz") as tar:
             for file in os.listdir(source_dir):
                 file_path = os.path.join(source_dir, file)
@@ -452,7 +551,8 @@ def create_dependencies_archive(source_dir, output_file):
         
     print(f"Dependencies archive created: {output_file}")
 
-def extract_bundle_archive(bundle_file, output_dir):
+
+def extract_bundle_archive(bundle_file: str, output_dir: str):
     """
         The function unzip a bundle
     """
@@ -476,8 +576,8 @@ def extract_bundle_archive(bundle_file, output_dir):
 
     print(f"Bundle extracted to: {output_dir}")
 
-@runtime_count
-def export_project(project_path, no_cleanup=False, commit_sha=None, latest_commit=False, manylinux=False, verbose=False):
+
+def export_project(project_path, no_cleanup=False, commit_sha=None, latest_commit=False):
     """
         The function handles the export command from getting the dependencies
         from the lockfiles to downloading it and creating a bundle
@@ -506,7 +606,10 @@ def export_project(project_path, no_cleanup=False, commit_sha=None, latest_commi
     npm_dependencies, npm_set = gather_npm_dependencies_from_locks(npm_lock_files)
     uv_dependencies, uv_set = gather_uv_dependencies_from_lockfiles(uv_lock_files)
     
+    failed_dependencies = []
+
     if commit_sha or latest_commit:
+        
         # clone the git repo from a specific sha
         git_path = 'remote_git'
         
@@ -515,8 +618,11 @@ def export_project(project_path, no_cleanup=False, commit_sha=None, latest_commi
             shutil.rmtree(git_path, onexc=remove_readonly)
         
         try:
+            # Dynamically get the git URL based on the target project path
+            dynamic_git_url = get_project_git_url(project_path)
+            
             # clone the git repo of the specific sha
-            fetch_git_by_sha(get_git_url(), commit_sha, latest_commit)
+            fetch_git_by_sha(dynamic_git_url, commit_sha, latest_commit)
             
             # get lock files
             git_npm_lock_files, git_uv_lock_files = find_lock_files(git_path)
@@ -526,26 +632,30 @@ def export_project(project_path, no_cleanup=False, commit_sha=None, latest_commi
             git_uv_dependencies, git_uv_set = gather_uv_dependencies_from_lockfiles(git_uv_lock_files)
             
             # download the dependencies
-            download_npm_dependencies(npm_dependencies, npm_dir, git_npm_set, verbose=verbose)
-            download_uv_dependencies(uv_dependencies, uv_dir, git_uv_set, manylinux, verbose)  
+            failed_npm = download_npm_dependencies(npm_dependencies, npm_dir, git_npm_set)
+            failed_uv = download_uv_dependencies(uv_dependencies, uv_dir, git_uv_set)
+            failed_dependencies.extend(failed_npm)
+            failed_dependencies.extend(failed_uv)
         finally:
             if os.path.exists(git_path):
                 shutil.rmtree(git_path, onexc=remove_readonly)
     else:
         # download all of the dependencies
-        download_npm_dependencies(npm_dependencies, npm_dir, verbose=verbose)
-        download_uv_dependencies(uv_dependencies, uv_dir, manylinux=manylinux, verbose=verbose)
+        failed_npm = download_npm_dependencies(npm_dependencies, npm_dir)
+        failed_uv = download_uv_dependencies(uv_dependencies, uv_dir)
+        failed_dependencies.extend(failed_npm)
+        failed_dependencies.extend(failed_uv)
     
     # if theres no uv dependencies remove the dir
-    if len(os.listdir(uv_dir)) == 0:
+    if os.path.exists(uv_dir) and len(os.listdir(uv_dir)) == 0:
         print("No uv dependencies required download")
         os.rmdir(uv_dir)
     
-    #  if theres no npm dependencies remove the dir
-    if len(os.listdir(npm_dir)) == 0:
+    # if theres no npm dependencies remove the dir
+    if os.path.exists(npm_dir) and len(os.listdir(npm_dir)) == 0:
         print("No npm dependencies required download")
         os.rmdir(npm_dir)
-    else:
+    elif os.path.exists(npm_dir):
         # create npm-dependencies.tgz
         npm_archive = os.path.join(bundle_dir, "npm-dependencies.tgz")
             
@@ -554,7 +664,7 @@ def export_project(project_path, no_cleanup=False, commit_sha=None, latest_commi
         # remove original npm dir
         shutil.rmtree(npm_dir)
             
-    if len(os.listdir(bundle_dir)):
+    if os.path.exists(bundle_dir) and len(os.listdir(bundle_dir)):
     
         # create final bundle
         create_bundle_archive(bundle_dir, f"{timestamp}-{COMMIT_SHA}.tar.gz")
@@ -563,9 +673,19 @@ def export_project(project_path, no_cleanup=False, commit_sha=None, latest_commi
         print("No dependencies required download")
 
     # cleanup the extracted folder
-    if not no_cleanup:
+    if not no_cleanup and os.path.exists(bundle_dir):
         shutil.rmtree(bundle_dir)
+
+    if failed_dependencies:
+        print("\n========================================")
+        print(f"Failed dependencies ({len(failed_dependencies)}):")
+        for dep in failed_dependencies:
+            print(f"  - {dep}")
+        print("========================================")
+    else:
+        print("\nAll dependencies downloaded successfully.")
         
+
 def import_bundle(bundle_file):
     """
         The function handles import of a zipped bundle file
@@ -585,13 +705,13 @@ def fetch_git_by_sha(git_url, commit_sha, latest_commit=False):
 
     try:
         # clone the repo and fetch the specific commit as an archive
-        subprocess.run(["git", "clone", "--no-checkout", git_url, temp_git],check=True)
+        subprocess.run(["git", "clone", "--no-checkout", git_url, temp_git], check=True)
         
         commit_sha = "HEAD^" if latest_commit else commit_sha
         
         print(f"Processing the commit: {commit_sha}")
         
-        subprocess.run(["git", "-C", "temp_git", "archive", "--format=tar", commit_sha, "-o", f"../{repo_archive}"],check=True)
+        subprocess.run(["git", "-C", "temp_git", "archive", "--format=tar", commit_sha, "-o", f"../{repo_archive}"], check=True)
 
         # make dir for the unzipped archive
         os.makedirs(git_path, exist_ok=True)
@@ -620,24 +740,29 @@ def remove_readonly(func, path, exc):
 
 
 def main():
+    global PYTHON_VERSION
 
     # creates general parser and get the args
     parser = create_parser()
     args = parser.parse_args()
     try:
+        # set the target python version if given
+        if args.command == "export" and args.python_version:
+            PYTHON_VERSION = parse_python_version(args.python_version)
+
         # if the command is export use the export function
         if args.command == "export":
 
-            export_project(args.project_path, args.no_cleanup, args.commit_sha, args.latest_commit, args.manylinux, args.verbose)
+            export_project(args.project_path, args.no_cleanup, args.commit_sha, args.latest_commit)
 
         # if the function is import use the import function
         elif args.command == "import":
             
             import_bundle(args.bundle_file)
-            
-    except (FileNotFoundError, NotADirectoryError, RuntimeError) as error:
+    except (FileNotFoundError, NotADirectoryError, RuntimeError, ValueError) as error:
         print(f"error: {error}")
         raise SystemExit(1)
+
 
 if __name__ == "__main__":
     main()

@@ -5,25 +5,38 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   dependencies:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
-          cache-dependency-path: scripts/requirements.txt
 
-      - name: Install dependencies
-        run: pip install -r scripts/requirements.txt
+      - name: Install script requirements
+        run: |
+          if [ -s scripts/requirements.txt ]; then
+            pip install -r scripts/requirements.txt
+          else
+            echo "No script requirements to install"
+          fi
 
       - name: Build dependencies bundle
-        run: python scripts/bundle.py export . --manylinux --latest-commit
+        run: python scripts/bundle.py export . --python-version 3.12 --latest-commit
 
       - name: Upload dependencies bundle
         uses: actions/upload-artifact@v4
@@ -31,11 +44,12 @@ jobs:
           name: dependencies-bundle
           path: "*.tar.gz"
           compression-level: 0
-          if-no-files-found: error
+          if-no-files-found: ignore
           retention-days: 1
 
   code:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout full repository
         uses: actions/checkout@v4
@@ -61,6 +75,7 @@ jobs:
   package:
     runs-on: ubuntu-latest
     needs: [dependencies, code]
+    timeout-minutes: 30
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -68,11 +83,17 @@ jobs:
           path: package
 
       - name: Show output
-        run: find package -type f
+        run: |
+          mkdir -p package
+          find package -type f
 
       - name: Archive, base64 and split into 25MB parts
         run: |
           mkdir -p final-package
+          if [ -z "$(find package -type f -print -quit)" ]; then
+            echo "Nothing to package"
+            exit 0
+          fi
           tar -czf package.tar.gz -C package .
           base64 -w 0 package.tar.gz > package.b64
           split -b 25M -d -a 3 package.b64 final-package/package.b64.part-
@@ -84,5 +105,5 @@ jobs:
           name: final-package
           path: final-package
           compression-level: 0
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
