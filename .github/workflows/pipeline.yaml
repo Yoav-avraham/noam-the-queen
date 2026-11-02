@@ -87,15 +87,14 @@ jobs:
           mkdir -p package
           find package -type f
 
-      - name: Archive and split into 25MB parts
+      - name: Archive
         run: |
           mkdir -p final-package
           if [ -z "$(find package -type f -print -quit)" ]; then
             echo "Nothing to package"
             exit 0
           fi
-          tar -czf package.tar.gz -C package .
-          split -b 25M -d -a 3 package.tar.gz final-package/package.tar.gz.part-
+          tar -czf final-package/package.tar.gz -C package .
           ls -lh final-package
 
       - name: Upload final package
