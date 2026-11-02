@@ -23,7 +23,7 @@ jobs:
         run: pip install -r scripts/requirements.txt
 
       - name: Build dependencies bundle
-        run: python scripts/bundle.py export . --manylinux
+        run: python scripts/bundle.py export . --manylinux --latest-commit
 
       - name: Upload dependencies bundle
         uses: actions/upload-artifact@v4
