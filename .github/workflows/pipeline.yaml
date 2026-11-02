@@ -87,7 +87,7 @@ jobs:
           mkdir -p package
           find package -type f
 
-      - name: Archive, base64 and split into 25MB parts
+      - name: Archive and split into 25MB parts
         run: |
           mkdir -p final-package
           if [ -z "$(find package -type f -print -quit)" ]; then
@@ -95,8 +95,7 @@ jobs:
             exit 0
           fi
           tar -czf package.tar.gz -C package .
-          base64 -w 0 package.tar.gz > package.b64
-          split -b 25M -d -a 3 package.b64 final-package/package.b64.part-
+          split -b 25M -d -a 3 package.tar.gz final-package/package.tar.gz.part-
           ls -lh final-package
 
       - name: Upload final package
