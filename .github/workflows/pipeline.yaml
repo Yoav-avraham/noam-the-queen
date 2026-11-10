@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  dependencies:
+  package:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -27,81 +27,29 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install script requirements
+      - name: Install tools
+        run: pip install ./bundle-deps ./bundle-code
+
+      - name: Build dependencies (unpacked)
         run: |
-          if [ -s scripts/requirements.txt ]; then
-            pip install -r scripts/requirements.txt
-          else
-            echo "No script requirements to install"
-          fi
+          bundle-deps . --latest-commit --manylinux --no-pack \
+            --bundle-name dependencies --output-dir "$RUNNER_TEMP/package"
 
-      - name: Build dependencies bundle
-        run: python scripts/bundle.py export . --python-version 3.12 --latest-commit
-
-      - name: Upload dependencies bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: dependencies-bundle
-          path: "*.tar.gz"
-          compression-level: 0
-          if-no-files-found: ignore
-          retention-days: 1
-
-  code:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - name: Checkout full repository
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
-      - name: Copy code with ignore filter
+      - name: Copy code (unpacked)
         run: |
-          python scripts/copy_script.py . code .transferignore
-
-      - name: Upload code
-        uses: actions/upload-artifact@v4
-        with:
-          name: code
-          path: code
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 1
-
-  package:
-    runs-on: ubuntu-latest
-    needs: [dependencies, code]
-    timeout-minutes: 30
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: package
+          IGNORE=()
+          if [ -f .transferignore ]; then IGNORE=(--ignore .transferignore); fi
+          bundle-code . "$RUNNER_TEMP/package/code" "${IGNORE[@]}"
 
       - name: Show output
-        run: |
-          mkdir -p package
-          find package -type f
+        run: find "$RUNNER_TEMP/package" -maxdepth 2
 
-      - name: Archive
-        run: |
-          mkdir -p final-package
-          if [ -z "$(find package -type f -print -quit)" ]; then
-            echo "Nothing to package"
-            exit 0
-          fi
-          tar -czf final-package/package.tar.gz -C package .
-          ls -lh final-package
-
-      - name: Upload final package
+      # the artifact itself is the only archive (GitHub zips it)
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
-          name: final-package
-          path: final-package
-          compression-level: 0
-          if-no-files-found: warn
+          name: package
+          path: ${{ runner.temp }}/package
+          include-hidden-files: true
+          if-no-files-found: error
           retention-days: 14
