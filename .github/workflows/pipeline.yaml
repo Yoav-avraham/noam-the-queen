@@ -32,7 +32,7 @@ jobs:
 
       - name: Build dependencies (unpacked)
         run: |
-          bundle-deps . --latest-commit --manylinux --no-pack \
+          bundle-deps . --manylinux --no-pack \
             --bundle-name dependencies --output-dir "$RUNNER_TEMP/package"
 
       - name: Copy code (unpacked)
